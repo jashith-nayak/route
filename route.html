@@ -1,1 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
 
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Route Traffic Analysis</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      background: #eef6f8;
+      font-family: Arial, sans-serif;
+      color: #16343b;
+    }
+
+    .container {
+      max-width: 650px;
+      margin: auto;
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 3px 14px #b8c8cc;
+    }
+
+    h1 {
+      color: #075985;
+      text-align: center;
+      font-size: 26px;
+    }
+
+    h2 {
+      color: #0f766e;
+      text-align: center;
+    }
+
+    .route-image {
+      width: 100%;
+      max-height: 230px;
+      object-fit: cover;
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 0;
+      margin-top: 10px;
+      margin-bottom: 12px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      background: #0284c7;
+      color: white;
+      border: none;
+      border-radius: 9px;
+      font-size: 17px;
+      margin-top: 12px;
+    }
+
+    button:disabled {
+      background: #94a3b8;
+    }
+
+    .info {
+      background: #f0fdfa;
+      border-left: 5px solid #0f766e;
+      padding: 12px;
+      margin-top: 12px;
+      border-radius: 6px;
+    }
+
+    .result {
+      margin-top: 18px;
+      background: #f8fafc;
+      padding: 14px;
+      border-radius: 10px;
+      line-height: 1.7;
+    }
+
+    .small {
+      color: #64748b;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>AI Traffic Analysis</h1>
+
+    <h2 id="routeTitle">Loading route...</h2>
+
+    <img
+      id="routeImage"
+      class="route-image"
+      src=""
+      alt="Preloaded route image"
+    >
+
+    <div class="info">
+      <p id="routeDistance"></p>
+      <p class="small">
+        Select 4 or 5 traffic images from this same route.
+      </p>
+    </div>
+
+    <label for="trafficImages">
+      Import traffic images for this route:
+    </label>
+
+    <input
+      id="trafficImages"
+      type="file"
+      accept="image/*"
+      multiple
+    >
+
+    <p id="fileStatus">
+      No images selected.
+    </p>
+
+    <button
+      id="analyzeButton"
+      onclick="analyzeRoute()"
+      disabled
+    >
+      Analyze This Route
+    </button>
+
+    <div id="result" class="result">
+      Loading AI model...
+    </div>
+  </div>
+
+  <script>
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/qoPpR_RwC/";
+
+    let model = null;
+    let currentRoute = null;
+
+    const routeSettings = {
+      A: {
+        name: "Route A",
+        distance: 8.0,
+        image: "images/route-a.jpg",
+        speeds: {
+          Light: 40,
+          Moderate: 22,
+          Heavy: 8
+        }
+      },
+
+      B: {
+        name: "Route B",
+        distance: 10.5,
+        image: "images/route-b.jpg",
+        speeds: {
+          Light: 60,
+          Moderate: 35,
+          Heavy: 15
+        }
+      },
+
+      C: {
+        name: "Route C",
+        distance: 7.2,
+        image: "images/route-c.jpg",
+        speeds: {
+          Light: 30,
+          Moderate: 18,
+          Heavy: 6
+        }
+      }
+    };
+
+    function getRouteFromURL() {
+      const parameters =
+        new URLSearchParams(window.location.search);
+
+      return parameters.get("route") || "A";
+    }
+
+    function configureRoutePage() {
+      const routeCode = getRouteFromURL();
+      currentRoute = routeSettings[routeCode];
+
+      if (!currentRoute) {
+        currentRoute = routeSettings.A;
+      }
+
+      document.getElementById("routeTitle").innerText =
+        currentRoute.name;
+
+      document.getElementById("routeImage").src =
+        currentRoute.image;
+
+      document.getElementById("routeDistance").innerText =
+        "Distance: " + currentRoute.distance + " km";
+    }
+
+    async function loadModel() {
+      try {
+        model = await tmImage.load(
+          MODEL_URL + "model.json",
+          MODEL_URL + "metadata.json"
+        );
+
+        document.getElementById("result").innerText =
+          "Model loaded. Select 4 or 5 images.";
+
+      } catch (error) {
+        document.getElementById("result").innerText =
+          "The AI model could not be loaded.";
+
+        console.error(error);
+      }
+    }
+
+    document
+      .getElementById("trafficImages")
+      .addEventListener("change", function() {
+        const numberOfFiles = this.files.length;
+
+        if (
+          numberOfFiles < 4 ||
+          numberOfFiles > 5
+        ) {
+          document.getElementById("fileStatus").innerText =
+            "Please select exactly 4 or 5 images.";
+
+          document.getElementById("analyzeButton").disabled =
+            true;
+
+          return;
+        }
+
+        document.getElementById("fileStatus").innerText =
+          numberOfFiles +
+          " images selected for " +
+          currentRoute.name +
+          ".";
+
+        document.getElementById("analyzeButton").disabled =
+          false;
+      });
+
+    async function predictImage(file) {
+      const imageURL = URL.createObjectURL(file);
+      const image = new Image();
+
+      await new Promise(function(resolve, reject) {
+        image.onload = resolve;
+        image.onerror = reject;
+        image.src = imageURL;
+      });
+
+      const predictions = await model.predict(image);
+
+      let pLight = 0;
+      let pModerate = 0;
+      let pHeavy = 0;
+
+      for (let i = 0; i < predictions.length; i++) {
+        const className =
+          predictions[i].className.toLowerCase();
+
+        const probability =
+          predictions[i].probability;
+
+        if (className.includes("light")) {
+          pLight = probability;
+        }
+
+        if (
+          className.includes("moderate") ||
+          className.includes("medium")
+        ) {
+          pModerate = probability;
+        }
+
+        if (className.includes("heavy")) {
+          pHeavy = probability;
+        }
+      }
+
+      const imageSpeed =
+        (pLight * currentRoute.speeds.Light) +
+        (pModerate * currentRoute.speeds.Moderate) +
+        (pHeavy * currentRoute.speeds.Heavy);
+
+      let strongestClass = "Light";
+      let strongestProbability = pLight;
+
+      if (pModerate > strongestProbability) {
+        strongestClass = "Moderate";
+        strongestProbability = pModerate;
+      }
+
+      if (pHeavy > strongestProbability) {
+        strongestClass = "Heavy";
+        strongestProbability = pHeavy;
+      }
+
+      URL.revokeObjectURL(imageURL);
+
+      return {
+        pLight: pLight,
+        pModerate: pModerate,
+        pHeavy: pHeavy,
+        traffic: strongestClass,
+        confidence: strongestProbability,
+        speed: imageSpeed
+      };
+    }
+
+    async function analyzeRoute() {
+      if (!model) {
+        alert("The model is still loading.");
+        return;
+      }
+
+      const files =
+        document.getElementById("trafficImages").files;
+
+      if (
+        files.length < 4 ||
+        files.length > 5
+      ) {
+        alert("Please select exactly 4 or 5 images.");
+        return;
+      }
+
+      document.getElementById("analyzeButton").disabled =
+        true;
+
+      document.getElementById("result").innerText =
+        "Analyzing images. Please wait...";
+
+      let totalSpeed = 0;
+      let totalLight = 0;
+      let totalModerate = 0;
+      let totalHeavy = 0;
+      let imageResults = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const prediction =
+          await predictImage(files[i]);
+
+        totalSpeed += prediction.speed;
+        totalLight += prediction.pLight;
+        totalModerate += prediction.pModerate;
+        totalHeavy += prediction.pHeavy;
+
+        imageResults.push(prediction);
+      }
+
+      const imageCount = files.length;
+
+      const averageSpeed =
+        totalSpeed / imageCount;
+
+      const averageLight =
+        totalLight / imageCount;
+
+      const averageModerate =
+        totalModerate / imageCount;
+
+      const averageHeavy =
+        totalHeavy / imageCount;
+
+      const estimatedTime =
+        (currentRoute.distance / averageSpeed) * 60;
+
+      const routeResult = {
+        routeCode: getRouteFromURL(),
+        routeName: currentRoute.name,
+        distance: currentRoute.distance,
+        imageCount: imageCount,
+        averageSpeed: Number(
+          averageSpeed.toFixed(2)
+        ),
+        estimatedTime: Number(
+          estimatedTime.toFixed(2)
+        ),
+        averageLight: Number(
+          averageLight.toFixed(4)
+        ),
+        averageModerate: Number(
+          averageModerate.toFixed(4)
+        ),
+        averageHeavy: Number(
+          averageHeavy.toFixed(4)
+        ),
+        imageResults: imageResults
+      };
+
+      showRouteResult(routeResult);
+      sendResultToAppInventor(routeResult);
+
+      document.getElementById("analyzeButton").disabled =
+        false;
+    }
+
+    function showRouteResult(result) {
+      document.getElementById("result").innerHTML = `
+        <h3>${result.routeName} analysis completed</h3>
+
+        <p>
+          Average predicted speed:
+          <b>${result.averageSpeed} km/h</b>
+        </p>
+
+        <p>
+          Estimated journey time:
+          <b>${result.estimatedTime} minutes</b>
+        </p>
+
+        <hr>
+
+        <p>
+          Average Light probability:
+          ${(result.averageLight * 100).toFixed(1)}%
+        </p>
+
+        <p>
+          Average Moderate probability:
+          ${(result.averageModerate * 100).toFixed(1)}%
+        </p>
+
+        <p>
+          Average Heavy probability:
+          ${(result.averageHeavy * 100).toFixed(1)}%
+        </p>
+
+        <p>
+          Images analyzed:
+          ${result.imageCount}
+        </p>
+      `;
+    }
+
+    function sendResultToAppInventor(result) {
+      const message =
+        result.routeCode + "|" +
+        result.routeName + "|" +
+        result.distance + "|" +
+        result.averageSpeed + "|" +
+        result.estimatedTime + "|" +
+        result.averageLight + "|" +
+        result.averageModerate + "|" +
+        result.averageHeavy;
+
+      if (
+        window.AppInventor &&
+        window.AppInventor.setWebViewString
+      ) {
+        window.AppInventor.setWebViewString(message);
+      }
+    }
+
+    configureRoutePage();
+    loadModel();
+  </script>
+</body>
+</html>
